@@ -1,0 +1,129 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  admin
+  team_lead
+  keeper
+}
+
+enum SubscriptionStatus {
+  active
+  grace_period
+  suspended
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String
+  role         Role
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  team          Team?        @relation("TeamLead")
+  checkIns      Attendance[] @relation("Keeper")
+  overrides     Attendance[] @relation("Override")
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+model Team {
+  id                    String             @id @default(uuid())
+  name                  String
+  playDay               String             @map("play_day")
+  sessionEndTime        String             @map("session_end_time") // e.g. "22:00"
+  monthlyFee            Int                @map("monthly_fee")
+  subscriptionStatus    SubscriptionStatus @default(active) @map("subscription_status")
+  subscriptionExpiresAt DateTime           @map("subscription_expires_at")
+  teamLeadId            String?            @unique @map("team_lead_id")
+  createdAt             DateTime           @default(now()) @map("created_at")
+
+  teamLead      User?          @relation("TeamLead", fields: [teamLeadId], references: [id])
+  members       Member[]
+  subscriptions Subscription[]
+
+  @@map("teams")
+}
+
+model Member {
+  id        String   @id @default(uuid())
+  teamId    String   @map("team_id")
+  fullName  String   @map("full_name")
+  phone     String?
+  photoUrl  String?  @map("photo_url")
+  active    Boolean  @default(true)
+  qrCode    String   @unique @map("qr_code") // UUID token used in QR
+  createdAt DateTime @default(now()) @map("created_at")
+
+  team       Team         @relation(fields: [teamId], references: [id])
+  attendance Attendance[]
+
+  @@map("members")
+}
+
+model Subscription {
+  id            String   @id @default(uuid())
+  teamId        String   @map("team_id")
+  amount        Int
+  renewalDate   DateTime @map("renewal_date")
+  autoRenew     Boolean  @default(true) @map("auto_renew")
+  paymentMethod String   @default("mpesa") @map("payment_method")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  team     Team      @relation(fields: [teamId], references: [id])
+  payments Payment[]
+
+  @@map("subscriptions")
+}
+
+model Payment {
+  id             String   @id @default(uuid())
+  subscriptionId String   @map("subscription_id")
+  intasendRef    String?  @map("intasend_ref")
+  status         String   @default("pending") // pending | success | failed
+  amount         Int
+  paidAt         DateTime? @map("paid_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id])
+
+  @@map("payments")
+}
+
+model Attendance {
+  id                 String    @id @default(uuid())
+  memberId           String    @map("member_id")
+  checkedInAt        DateTime  @default(now()) @map("checked_in_at")
+  checkedOutAt       DateTime? @map("checked_out_at")
+  keeperId           String    @map("keeper_id")
+  overrideApprovedBy String?   @map("override_approved_by")
+  note               String?
+
+  member   Member @relation(fields: [memberId], references: [id])
+  keeper   User   @relation("Keeper", fields: [keeperId], references: [id])
+  approver User?  @relation("Override", fields: [overrideApprovedBy], references: [id])
+
+  @@map("attendance")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String   @map("actor_id")
+  action     String
+  targetType String   @map("target_type")
+  targetId   String   @map("target_id")
+  meta       Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  actor User @relation(fields: [actorId], references: [id])
+
+  @@map("audit_logs")
+}

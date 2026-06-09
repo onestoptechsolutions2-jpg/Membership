@@ -1,0 +1,48 @@
+version: '3.9'
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: membership
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+      POSTGRES_DB: membership
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U membership']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://membership:${DB_PASSWORD:-changeme}@db:5432/membership
+      JWT_SECRET: ${JWT_SECRET:-change-in-production}
+      PORT: 4000
+      APP_URL: ${APP_URL:-http://localhost}
+      INTASEND_SECRET_KEY: ${INTASEND_SECRET_KEY}
+      INTASEND_PUBLISHABLE_KEY: ${INTASEND_PUBLISHABLE_KEY}
+      INTASEND_WEBHOOK_SECRET: ${INTASEND_WEBHOOK_SECRET}
+    volumes:
+      - uploads:/app/uploads
+    ports:
+      - '4000:4000'
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - '80:80'
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  uploads:
