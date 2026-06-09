@@ -7,4 +7,4 @@ COPY . .
 RUN mkdir -p uploads/photos
 RUN npx prisma generate
 EXPOSE 4000
-CMD ["sh", "-c", "npx prisma db push && node src/app.js"]
+CMD ["sh", "-c", "npx prisma db push && node prisma/seed.js && node src/app.js"]
