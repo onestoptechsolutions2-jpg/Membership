@@ -38,8 +38,8 @@ services:
   frontend:
     build: ./frontend
     restart: unless-stopped
-    expose:
-      - '7030'
+    ports:
+      - '7030:7030'
     depends_on:
       - backend
 
