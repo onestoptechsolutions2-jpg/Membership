@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
+import { Html5Qrcode } from 'html5-qrcode'
 import api from '../lib/api.js'
 import { useAuth } from '../hooks/useAuth.js'
-import { ScanLine, Search, CheckCircle2, XCircle, AlertTriangle, LogOut, RotateCcw } from 'lucide-react'
+import { ScanLine, Search, CheckCircle2, XCircle, AlertTriangle, LogOut, RotateCcw, Camera, CameraOff } from 'lucide-react'
 
 const STATUS = { idle: 'idle', loading: 'loading', allowed: 'allowed', blocked: 'blocked', error: 'error' }
 
@@ -13,10 +14,9 @@ function ResultDisplay({ result, onOverride, onReset, overriding }) {
 
   return (
     <div className={`rounded-2xl p-6 text-center space-y-4 ${isAllowed ? 'bg-green-50 border-2 border-green-400' : 'bg-red-50 border-2 border-red-400'}`}>
-      {member?.photoUrl && (
+      {member?.photoUrl ? (
         <img src={member.photoUrl} alt={member.fullName} className="w-24 h-24 rounded-full object-cover mx-auto border-4 border-white shadow" />
-      )}
-      {!member?.photoUrl && (
+      ) : (
         <div className="w-24 h-24 rounded-full bg-gray-200 mx-auto flex items-center justify-center text-3xl font-bold text-gray-400">
           {member?.fullName?.[0] || '?'}
         </div>
@@ -28,7 +28,7 @@ function ResultDisplay({ result, onOverride, onReset, overriding }) {
       }
 
       <div>
-        <p className="text-2xl font-bold">{member?.fullName || 'Unknown'}</p>
+        <p className="text-2xl font-bold text-gray-900">{member?.fullName || 'Unknown'}</p>
         <p className="text-gray-600">{member?.team?.name}</p>
       </div>
 
@@ -55,7 +55,7 @@ function ResultDisplay({ result, onOverride, onReset, overriding }) {
                   id="override-note"
                   type="text"
                   placeholder="Reason for override (optional)"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-orange-400"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-orange-400 text-gray-900"
                 />
                 <button
                   onClick={() => onOverride(document.getElementById('override-note').value)}
@@ -72,7 +72,7 @@ function ResultDisplay({ result, onOverride, onReset, overriding }) {
 
       <button
         onClick={onReset}
-        className="w-full flex items-center justify-center gap-2 border border-gray-300 py-3 rounded-xl hover:bg-white text-gray-600 font-medium"
+        className="w-full flex items-center justify-center gap-2 border border-gray-300 py-3 rounded-xl hover:bg-gray-50 text-gray-600 font-medium"
       >
         <RotateCcw size={16} /> Next Member
       </button>
@@ -80,20 +80,67 @@ function ResultDisplay({ result, onOverride, onReset, overriding }) {
   )
 }
 
+function CameraScanner({ onScan, active }) {
+  const scannerRef = useRef(null)
+  const html5QrRef = useRef(null)
+  const scannedRef = useRef(false)
+
+  useEffect(() => {
+    if (!active) return
+
+    scannedRef.current = false
+    const scanner = new Html5Qrcode('qr-reader')
+    html5QrRef.current = scanner
+
+    scanner.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: { width: 250, height: 250 } },
+      (decodedText) => {
+        if (scannedRef.current) return
+        scannedRef.current = true
+        // Extract UUID from profile URL if scanned from profile page
+        const match = decodedText.match(/\/profile\/([a-f0-9-]{36})/)
+        const code = match ? match[1] : decodedText.trim()
+        onScan(code)
+      },
+      () => {} // ignore per-frame errors
+    ).catch((err) => {
+      console.error('Camera start error:', err)
+    })
+
+    return () => {
+      scanner.stop().catch(() => {})
+    }
+  }, [active])
+
+  return (
+    <div className="bg-gray-800 rounded-2xl overflow-hidden">
+      <div id="qr-reader" className="w-full" />
+      {!active && (
+        <div className="p-10 text-center">
+          <Camera size={48} className="mx-auto text-gray-500 mb-2" />
+          <p className="text-gray-400">Camera stopped</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function GateTablet() {
   const { user, logout } = useAuth()
-  const [mode, setMode] = useState('search') // 'qr' | 'search'
+  const [mode, setMode] = useState('camera') // 'camera' | 'search'
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState(STATUS.idle)
   const [result, setResult] = useState(null)
   const [overriding, setOverriding] = useState(false)
+  const [cameraActive, setCameraActive] = useState(true)
   const inputRef = useRef()
 
-  // Auto-focus input on mount and reset
   useEffect(() => { inputRef.current?.focus() }, [status])
 
   async function checkIn(qrCode, override = false, note = '') {
     setStatus(STATUS.loading)
+    setCameraActive(false)
     try {
       const { data } = await api.post('/attendance/checkin', { qrCode, override, note })
       setResult({ ...data, overrideOk: override })
@@ -108,14 +155,7 @@ export default function GateTablet() {
   async function handleSearch(e) {
     e.preventDefault()
     if (!query.trim()) return
-    // Search by name or QR directly
-    try {
-      // Try as direct QR token first
-      await checkIn(query.trim())
-    } catch {
-      setResult({ ok: false, message: 'Member not found' })
-      setStatus(STATUS.blocked)
-    }
+    await checkIn(query.trim())
     setQuery('')
   }
 
@@ -123,29 +163,19 @@ export default function GateTablet() {
     setResult(null)
     setStatus(STATUS.idle)
     setQuery('')
+    if (mode === 'camera') setCameraActive(true)
     setTimeout(() => inputRef.current?.focus(), 50)
   }
 
-  // QR scanner: listen for rapid key input (barcode/QR scanners act as keyboard)
-  const scanBuffer = useRef('')
-  const scanTimer = useRef(null)
+  function switchMode(m) {
+    setMode(m)
+    setResult(null)
+    setStatus(STATUS.idle)
+    setQuery('')
+    setCameraActive(m === 'camera')
+  }
 
-  useEffect(() => {
-    if (mode !== 'qr') return
-    function onKey(e) {
-      if (e.key === 'Enter') {
-        const code = scanBuffer.current.trim()
-        scanBuffer.current = ''
-        if (code) checkIn(code)
-      } else {
-        scanBuffer.current += e.key
-        clearTimeout(scanTimer.current)
-        scanTimer.current = setTimeout(() => { scanBuffer.current = '' }, 100)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [mode])
+  const showResult = status === STATUS.allowed || status === STATUS.blocked
 
   return (
     <div className="min-h-screen bg-gray-900 text-white flex flex-col">
@@ -153,7 +183,7 @@ export default function GateTablet() {
       <header className="flex items-center justify-between px-6 py-4 bg-gray-800">
         <div className="flex items-center gap-2">
           <ScanLine size={22} className="text-blue-400" />
-          <span className="font-bold text-lg">Gate</span>
+          <span className="font-bold text-lg">Gate Check-In</span>
         </div>
         <div className="flex items-center gap-4">
           <span className="text-gray-400 text-sm">{user?.name}</span>
@@ -163,10 +193,13 @@ export default function GateTablet() {
 
       {/* Mode toggle */}
       <div className="flex mx-6 mt-5 bg-gray-800 rounded-xl p-1">
-        {[{ key: 'qr', label: 'Scan QR', icon: ScanLine }, { key: 'search', label: 'Search Name', icon: Search }].map(({ key, label, icon: Icon }) => (
+        {[
+          { key: 'camera', label: 'Camera Scan', icon: Camera },
+          { key: 'search', label: 'Search / Type', icon: Search }
+        ].map(({ key, label, icon: Icon }) => (
           <button
             key={key}
-            onClick={() => { setMode(key); reset() }}
+            onClick={() => switchMode(key)}
             className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg font-medium transition ${mode === key ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
           >
             <Icon size={18} /> {label}
@@ -176,18 +209,26 @@ export default function GateTablet() {
 
       {/* Main area */}
       <div className="flex-1 px-6 py-5 space-y-5">
-        {status === STATUS.idle || status === STATUS.loading ? (
+        {showResult ? (
+          <ResultDisplay
+            result={result}
+            overriding={overriding}
+            onReset={reset}
+            onOverride={async (note) => {
+              setOverriding(true)
+              await checkIn(result.member?.qrCode || query, true, note)
+              setOverriding(false)
+            }}
+          />
+        ) : (
           <>
-            {mode === 'qr' ? (
-              <div className="bg-gray-800 rounded-2xl p-10 text-center">
-                <div className="border-4 border-dashed border-blue-500 rounded-2xl p-10 mb-4">
-                  <ScanLine size={64} className="mx-auto text-blue-400 mb-3" />
-                  <p className="text-xl font-semibold">Ready to Scan</p>
-                  <p className="text-gray-400 mt-1">Point QR code at scanner</p>
-                </div>
+            {mode === 'camera' ? (
+              <div className="space-y-3">
+                <CameraScanner active={cameraActive} onScan={(code) => checkIn(code)} />
                 {status === STATUS.loading && (
-                  <p className="text-blue-400 animate-pulse">Checking…</p>
+                  <p className="text-blue-400 animate-pulse text-center">Checking member…</p>
                 )}
+                <p className="text-gray-500 text-sm text-center">Point camera at member's QR code</p>
               </div>
             ) : (
               <form onSubmit={handleSearch} className="space-y-3">
@@ -198,7 +239,7 @@ export default function GateTablet() {
                     type="text"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search member name or scan QR…"
+                    placeholder="Type member name or paste QR code…"
                     className="w-full bg-gray-800 border border-gray-600 text-white rounded-xl pl-11 pr-4 py-4 text-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     autoFocus
                   />
@@ -213,21 +254,9 @@ export default function GateTablet() {
               </form>
             )}
           </>
-        ) : (
-          <ResultDisplay
-            result={result}
-            overriding={overriding}
-            onReset={reset}
-            onOverride={async (note) => {
-              setOverriding(true)
-              await checkIn(result.member?.qrCode || query, true, note)
-              setOverriding(false)
-            }}
-          />
         )}
       </div>
 
-      {/* Today's count */}
       <TodayCount />
     </div>
   )
