@@ -39,7 +39,7 @@ services:
     build: ./frontend
     restart: unless-stopped
     expose:
-      - '80'
+      - '7030'
     depends_on:
       - backend
 
