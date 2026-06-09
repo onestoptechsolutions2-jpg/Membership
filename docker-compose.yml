@@ -32,14 +32,14 @@ services:
       INTASEND_WEBHOOK_SECRET: ${INTASEND_WEBHOOK_SECRET}
     volumes:
       - uploads:/app/uploads
-    ports:
-      - '4000:4000'
+    expose:
+      - '4000'
 
   frontend:
     build: ./frontend
     restart: unless-stopped
-    ports:
-      - '80:80'
+    expose:
+      - '80'
     depends_on:
       - backend
 
