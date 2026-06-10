@@ -3,6 +3,9 @@ import { Html5Qrcode } from 'html5-qrcode'
 import api from '../lib/api.js'
 import { useAuth } from '../hooks/useAuth.js'
 import { ScanLine, Search, CheckCircle2, XCircle, AlertTriangle, LogOut, RotateCcw, Camera, Wifi, WifiOff } from 'lucide-react'
+import TourGuide from '../components/TourGuide.jsx'
+import HelpPanel from '../components/HelpPanel.jsx'
+import OnboardingChecklist from '../components/OnboardingChecklist.jsx'
 
 const STATUS = { idle: 'idle', loading: 'loading', allowed: 'allowed', blocked: 'blocked', error: 'error' }
 const CACHE_KEY = 'gate_members_cache'
@@ -306,18 +309,22 @@ export default function GateTablet() {
           <ScanLine size={22} className="text-blue-400" />
           <span className="font-bold text-lg">Gate Check-In</span>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           {/* Connectivity badge */}
-          {isOnline ? (
-            <span className="flex items-center gap-1 text-green-400 text-xs font-medium">
-              <Wifi size={14} /> Online
-            </span>
-          ) : (
-            <span className="flex items-center gap-1 text-yellow-400 text-xs font-medium animate-pulse">
-              <WifiOff size={14} /> Offline{queuedCount > 0 ? ` · ${queuedCount} queued` : ''}
-            </span>
-          )}
+          <span data-tour="offline-badge" className="flex items-center gap-1">
+            {isOnline ? (
+              <span className="flex items-center gap-1 text-green-400 text-xs font-medium">
+                <Wifi size={14} /> Online
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-yellow-400 text-xs font-medium animate-pulse">
+                <WifiOff size={14} /> Offline{queuedCount > 0 ? ` · ${queuedCount} queued` : ''}
+              </span>
+            )}
+          </span>
           {syncing && <span className="text-blue-400 text-xs animate-pulse">Syncing…</span>}
+          <TourGuide role="keeper" storageKey="tour_done_gate" />
+          <HelpPanel role="keeper" />
           <span className="text-gray-400 text-sm">{user?.name}</span>
           <button onClick={logout} className="text-gray-400 hover:text-white"><LogOut size={18} /></button>
         </div>
@@ -330,8 +337,13 @@ export default function GateTablet() {
         </div>
       )}
 
+      {/* Onboarding checklist */}
+      <div className="mx-6 mt-4">
+        <OnboardingChecklist role="keeper" />
+      </div>
+
       {/* Mode toggle */}
-      <div className="flex mx-6 mt-5 bg-gray-800 rounded-xl p-1">
+      <div className="flex mx-6 mt-4 bg-gray-800 rounded-xl p-1" data-tour="mode-toggle">
         {[
           { key: 'camera', label: 'Camera Scan', icon: Camera },
           { key: 'search', label: 'Search / Type', icon: Search }
@@ -403,6 +415,7 @@ export default function GateTablet() {
 }
 
 function TodayCount({ offline }) {
+  // expose data-tour for the walkthrough
   const [count, setCount] = useState(null)
   useEffect(() => {
     if (offline) return
@@ -415,7 +428,7 @@ function TodayCount({ offline }) {
 
   return (
     <div className="px-6 pb-6">
-      <div className="bg-gray-800 rounded-xl px-5 py-3 flex items-center justify-between">
+      <div className="bg-gray-800 rounded-xl px-5 py-3 flex items-center justify-between" data-tour="today-count">
         <span className="text-gray-400 text-sm">Today's check-ins</span>
         <span className="text-white font-bold text-lg">{offline ? '—' : (count ?? '…')}</span>
       </div>

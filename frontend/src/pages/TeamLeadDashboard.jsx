@@ -5,6 +5,9 @@ import api from '../lib/api.js'
 import { useAuth } from '../hooks/useAuth.js'
 import { Users, LogOut, Plus, Pencil, Trash2, QrCode, X, Upload, Ban, ArrowRightLeft, UserCheck, FileDown, TrendingUp } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
+import TourGuide from '../components/TourGuide.jsx'
+import HelpPanel from '../components/HelpPanel.jsx'
+import OnboardingChecklist from '../components/OnboardingChecklist.jsx'
 
 // ── Sub-components ──────────────────────────────────────────────────────────
 
@@ -179,19 +182,24 @@ export default function TeamLeadDashboard() {
           <h1 className="text-xl font-bold text-gray-900">{team?.name || 'Team Dashboard'}</h1>
           {team && <SubBadge status={team.subscriptionStatus} />}
         </div>
-        <div className="flex items-center gap-4">
-          <Link to="/lead/registrations" className="text-sm text-orange-600 font-medium flex items-center gap-1">
+        <div className="flex items-center gap-3">
+          <Link to="/lead/registrations" data-tour="approvals-link" className="text-sm text-orange-600 font-medium flex items-center gap-1">
             <UserCheck size={15} /> Approvals {stats?.pendingRegistrations > 0 && <span className="bg-orange-500 text-white text-xs rounded-full px-1.5">{stats.pendingRegistrations}</span>}
           </Link>
           <Link to="/lead/report" className="text-sm text-green-600 font-medium flex items-center gap-1"><FileDown size={15} /> Reports</Link>
+          <TourGuide role="team_lead" storageKey="tour_done_lead" />
+          <HelpPanel role="team_lead" />
           <span className="text-gray-500 text-sm">{user?.name}</span>
           <button onClick={logout} className="text-gray-400 hover:text-gray-700"><LogOut size={18} /></button>
         </div>
       </header>
 
       <div className="p-6 max-w-4xl mx-auto space-y-6">
+        {/* Onboarding checklist */}
+        <OnboardingChecklist role="team_lead" stats={stats} members={members} />
+
         {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4" data-tour="lead-stats">
           {[
             { label: 'Active Members', value: activeMembers.length, color: 'green' },
             { label: "Today's Check-ins", value: stats?.todayCheckIns, color: 'blue' },
@@ -210,7 +218,7 @@ export default function TeamLeadDashboard() {
 
         {/* Trend chart */}
         {stats?.attendanceTrend?.length > 0 && (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5" data-tour="lead-chart">
             <h2 className="font-semibold text-gray-800 mb-4 flex items-center gap-2"><TrendingUp size={18} /> Attendance — Last 30 Days</h2>
             <ResponsiveContainer width="100%" height={180}>
               <LineChart data={stats.attendanceTrend}>
@@ -225,7 +233,7 @@ export default function TeamLeadDashboard() {
         )}
 
         {/* Bulk import */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5" data-tour="bulk-import">
           <h2 className="font-semibold text-gray-800 mb-3">Bulk Import Members</h2>
           <p className="text-sm text-gray-500 mb-3">CSV format: <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">fullName,phone,email</code> (header row required)</p>
           <div className="flex gap-3 items-center">
@@ -241,7 +249,7 @@ export default function TeamLeadDashboard() {
         </div>
 
         {/* Members list */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden" data-tour="member-list">
           <div className="p-5 border-b border-gray-100 flex items-center justify-between">
             <h2 className="font-semibold text-gray-800">Members ({members.length})</h2>
             <button onClick={() => setShowAdd(v => !v)}

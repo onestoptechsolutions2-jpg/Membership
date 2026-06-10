@@ -4,6 +4,9 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 import api from '../lib/api.js'
 import { useAuth } from '../hooks/useAuth.js'
 import { Users, Building2, AlertTriangle, TrendingUp, PlusCircle, UserCheck, Shield, FileDown, LogOut } from 'lucide-react'
+import TourGuide from '../components/TourGuide.jsx'
+import HelpPanel from '../components/HelpPanel.jsx'
+import OnboardingChecklist from '../components/OnboardingChecklist.jsx'
 
 export default function AdminDashboard() {
   const { user, logout } = useAuth()
@@ -37,15 +40,20 @@ export default function AdminDashboard() {
       {/* Header */}
       <header className="bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between">
         <h1 className="text-xl font-bold text-gray-900">Admin Dashboard</h1>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          <TourGuide role="admin" storageKey="tour_done_admin" />
+          <HelpPanel role="admin" />
           <span className="text-gray-500 text-sm">{user?.name}</span>
           <button onClick={logout} className="text-gray-400 hover:text-gray-700"><LogOut size={18} /></button>
         </div>
       </header>
 
       <div className="p-6 max-w-6xl mx-auto space-y-6">
+        {/* Onboarding checklist */}
+        <OnboardingChecklist role="admin" stats={stats} teams={teams} />
+
         {/* Action bar */}
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-3" data-tour="action-bar">
           <button onClick={() => setShowForm(v => !v)}
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-sm font-medium">
             <PlusCircle size={16} /> New Team
@@ -65,7 +73,7 @@ export default function AdminDashboard() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4" data-tour="stats">
           {[
             { icon: Building2, label: 'Total Teams', value: stats?.totalTeams, color: 'blue' },
             { icon: Users, label: 'Active Members', value: stats?.activeMembers, color: 'green' },
@@ -87,7 +95,7 @@ export default function AdminDashboard() {
 
         {/* Attendance trend chart */}
         {stats?.attendanceTrend?.length > 0 && (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5" data-tour="trend-chart">
             <h2 className="font-semibold text-gray-800 mb-4">Attendance — Last 30 Days</h2>
             <ResponsiveContainer width="100%" height={220}>
               <LineChart data={stats.attendanceTrend}>
@@ -103,7 +111,7 @@ export default function AdminDashboard() {
 
         {/* Expiring soon */}
         {stats?.expiringSoon?.length > 0 && (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5" data-tour="expiring">
             <h2 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
               <AlertTriangle size={18} className="text-orange-500" /> Subscriptions Expiring Soon
             </h2>
@@ -152,7 +160,7 @@ export default function AdminDashboard() {
         )}
 
         {/* Teams table */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden" data-tour="teams-table">
           <div className="p-5 border-b border-gray-100"><h2 className="font-semibold text-gray-800">All Teams</h2></div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
