@@ -19,6 +19,12 @@ enum SubscriptionStatus {
   suspended
 }
 
+enum RegistrationStatus {
+  pending
+  approved
+  rejected
+}
+
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
@@ -38,30 +44,47 @@ model User {
 model Team {
   id                    String             @id @default(uuid())
   name                  String
-  playDay               String             @map("play_day")
-  sessionEndTime        String             @map("session_end_time") // e.g. "22:00"
+  playDay               String             @map("play_day")           // kept for backward compat
+  sessionEndTime        String             @map("session_end_time")   // kept for backward compat
   monthlyFee            Int                @map("monthly_fee")
   subscriptionStatus    SubscriptionStatus @default(active) @map("subscription_status")
   subscriptionExpiresAt DateTime           @map("subscription_expires_at")
   teamLeadId            String?            @unique @map("team_lead_id")
   createdAt             DateTime           @default(now()) @map("created_at")
 
-  teamLead      User?          @relation("TeamLead", fields: [teamLeadId], references: [id])
+  teamLead      User?             @relation("TeamLead", fields: [teamLeadId], references: [id])
   members       Member[]
   subscriptions Subscription[]
+  schedules     SessionSchedule[]
 
   @@map("teams")
 }
 
+// Multi-day session schedules (Phase 2)
+model SessionSchedule {
+  id             String @id @default(uuid())
+  teamId         String @map("team_id")
+  dayOfWeek      String @map("day_of_week") // Monday, Tuesday, etc.
+  sessionEndTime String @map("session_end_time") // HH:MM
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@map("session_schedules")
+}
+
 model Member {
-  id        String   @id @default(uuid())
-  teamId    String   @map("team_id")
-  fullName  String   @map("full_name")
-  phone     String?
-  photoUrl  String?  @map("photo_url")
-  active    Boolean  @default(true)
-  qrCode    String   @unique @map("qr_code") // UUID token used in QR
-  createdAt DateTime @default(now()) @map("created_at")
+  id                 String             @id @default(uuid())
+  teamId             String             @map("team_id")
+  fullName           String             @map("full_name")
+  phone              String?
+  email              String?
+  photoUrl           String?            @map("photo_url")
+  active             Boolean            @default(true)
+  qrCode             String             @unique @map("qr_code")
+  registrationStatus RegistrationStatus @default(approved) @map("registration_status")
+  suspendedAt        DateTime?          @map("suspended_at")
+  suspensionReason   String?            @map("suspension_reason")
+  createdAt          DateTime           @default(now()) @map("created_at")
 
   team       Team         @relation(fields: [teamId], references: [id])
   attendance Attendance[]
@@ -85,13 +108,13 @@ model Subscription {
 }
 
 model Payment {
-  id             String   @id @default(uuid())
-  subscriptionId String   @map("subscription_id")
-  intasendRef    String?  @map("intasend_ref")
-  status         String   @default("pending") // pending | success | failed
+  id             String    @id @default(uuid())
+  subscriptionId String    @map("subscription_id")
+  intasendRef    String?   @map("intasend_ref")
+  status         String    @default("pending") // pending | success | failed
   amount         Int
   paidAt         DateTime? @map("paid_at")
-  createdAt      DateTime @default(now()) @map("created_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
 
   subscription Subscription @relation(fields: [subscriptionId], references: [id])
 

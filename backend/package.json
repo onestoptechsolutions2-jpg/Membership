@@ -21,7 +21,11 @@
     "node-cron": "^3.0.3",
     "qrcode": "^1.5.4",
     "uuid": "^10.0.0",
-    "axios": "^1.7.2"
+    "axios": "^1.7.2",
+    "africastalking": "^0.6.4",
+    "pdfkit": "^0.15.0",
+    "csv-stringify": "^6.4.6",
+    "papaparse": "^5.4.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.4",

@@ -12,6 +12,7 @@ router.get('/', authenticate, async (req, res) => {
     where,
     include: {
       teamLead: { select: { id: true, name: true, email: true } },
+      schedules: true,
       _count: { select: { members: { where: { active: true } } } },
     },
     orderBy: { name: 'asc' },
@@ -39,22 +40,44 @@ router.get('/:id', authenticate, async (req, res) => {
 
 // POST /api/teams  (admin)
 router.post('/', authenticate, requireRole('admin'), async (req, res) => {
-  const { name, playDay, sessionEndTime, monthlyFee, teamLeadId } = req.body
+  const { name, playDay, sessionEndTime, monthlyFee, teamLeadId, schedules } = req.body
   const expires = new Date()
   expires.setMonth(expires.getMonth() + 1)
 
   const team = await prisma.team.create({
     data: {
       name,
-      playDay,
+      playDay: playDay || 'Monday',
       sessionEndTime: sessionEndTime || '22:00',
       monthlyFee,
       teamLeadId: teamLeadId || null,
       subscriptionStatus: 'active',
       subscriptionExpiresAt: expires,
+      schedules: schedules?.length
+        ? { create: schedules.map(s => ({ dayOfWeek: s.dayOfWeek, sessionEndTime: s.sessionEndTime })) }
+        : undefined,
     },
+    include: { schedules: true },
   })
   res.status(201).json(team)
+})
+
+// PUT /api/teams/:id/schedules — replace session schedules
+router.put('/:id/schedules', authenticate, async (req, res) => {
+  const team = await prisma.team.findUnique({ where: { id: req.params.id } })
+  if (!team) return res.status(404).json({ error: 'Not found' })
+  if (req.user.role === 'team_lead' && team.teamLeadId !== req.user.id)
+    return res.status(403).json({ error: 'Forbidden' })
+
+  const { schedules } = req.body // [{ dayOfWeek, sessionEndTime }]
+  await prisma.sessionSchedule.deleteMany({ where: { teamId: req.params.id } })
+  if (schedules?.length) {
+    await prisma.sessionSchedule.createMany({
+      data: schedules.map(s => ({ teamId: req.params.id, dayOfWeek: s.dayOfWeek, sessionEndTime: s.sessionEndTime })),
+    })
+  }
+  const updated = await prisma.team.findUnique({ where: { id: req.params.id }, include: { schedules: true } })
+  res.json(updated)
 })
 
 // PATCH /api/teams/:id  (admin or own team_lead)

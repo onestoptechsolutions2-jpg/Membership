@@ -1,15 +1,57 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { Html5Qrcode } from 'html5-qrcode'
 import api from '../lib/api.js'
 import { useAuth } from '../hooks/useAuth.js'
-import { ScanLine, Search, CheckCircle2, XCircle, AlertTriangle, LogOut, RotateCcw, Camera, CameraOff } from 'lucide-react'
+import { ScanLine, Search, CheckCircle2, XCircle, AlertTriangle, LogOut, RotateCcw, Camera, Wifi, WifiOff } from 'lucide-react'
 
 const STATUS = { idle: 'idle', loading: 'loading', allowed: 'allowed', blocked: 'blocked', error: 'error' }
+const CACHE_KEY = 'gate_members_cache'
+const CACHE_DATE_KEY = 'gate_members_cache_date'
+const OFFLINE_QUEUE_KEY = 'gate_offline_queue'
 
-function ResultDisplay({ result, onOverride, onReset, overriding }) {
+// ── Offline helpers ──────────────────────────────────────────────────────────
+
+function cacheMembersLocally(members) {
+  const today = new Date().toISOString().slice(0, 10)
+  const map = {}
+  members.forEach(m => { if (m.qrCode) map[m.qrCode] = m })
+  localStorage.setItem(CACHE_KEY, JSON.stringify(map))
+  localStorage.setItem(CACHE_DATE_KEY, today)
+}
+
+function getOfflineMember(qrCode) {
+  const today = new Date().toISOString().slice(0, 10)
+  if (localStorage.getItem(CACHE_DATE_KEY) !== today) return null
+  try {
+    const map = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}')
+    return map[qrCode] || null
+  } catch { return null }
+}
+
+function enqueueOfflineCheckin(qrCode) {
+  try {
+    const q = JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || '[]')
+    if (!q.find(e => e.qrCode === qrCode)) {
+      q.push({ qrCode, timestamp: new Date().toISOString() })
+      localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(q))
+    }
+  } catch {}
+}
+
+function getOfflineQueue() {
+  try { return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || '[]') } catch { return [] }
+}
+
+function clearOfflineQueue() {
+  localStorage.removeItem(OFFLINE_QUEUE_KEY)
+}
+
+// ── Sub-components ───────────────────────────────────────────────────────────
+
+function ResultDisplay({ result, onOverride, onReset, overriding, offline }) {
   if (!result) return null
 
-  const isAllowed = result.ok || result.overrideOk
+  const isAllowed = result.ok || result.overrideOk || result.offlineAllowed
   const member = result.member || result.attendance?.member
 
   return (
@@ -37,6 +79,7 @@ function ResultDisplay({ result, onOverride, onReset, overriding }) {
           <p className="text-green-800 font-semibold text-lg">✓ CHECK IN ALLOWED</p>
           <p className="text-green-700 text-sm">
             {new Date().toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}
+            {result.offlineAllowed && ' · Queued for sync'}
           </p>
         </div>
       ) : (
@@ -45,7 +88,7 @@ function ResultDisplay({ result, onOverride, onReset, overriding }) {
             <p className="text-red-800 font-semibold">{result.message}</p>
           </div>
 
-          {result.code !== 'NOT_FOUND' && result.code !== 'ALREADY_IN' && (
+          {result.code !== 'NOT_FOUND' && result.code !== 'ALREADY_IN' && !offline && (
             <div className="space-y-2">
               <p className="text-sm text-gray-500 flex items-center justify-center gap-1">
                 <AlertTriangle size={14} /> Override requires admin or team lead
@@ -81,7 +124,6 @@ function ResultDisplay({ result, onOverride, onReset, overriding }) {
 }
 
 function CameraScanner({ onScan, active }) {
-  const scannerRef = useRef(null)
   const html5QrRef = useRef(null)
   const scannedRef = useRef(false)
 
@@ -98,12 +140,11 @@ function CameraScanner({ onScan, active }) {
       (decodedText) => {
         if (scannedRef.current) return
         scannedRef.current = true
-        // Extract UUID from profile URL if scanned from profile page
         const match = decodedText.match(/\/profile\/([a-f0-9-]{36})/)
         const code = match ? match[1] : decodedText.trim()
         onScan(code)
       },
-      () => {} // ignore per-frame errors
+      () => {}
     ).catch((err) => {
       console.error('Camera start error:', err)
     })
@@ -126,6 +167,8 @@ function CameraScanner({ onScan, active }) {
   )
 }
 
+// ── Main ─────────────────────────────────────────────────────────────────────
+
 export default function GateTablet() {
   const { user, logout } = useAuth()
   const [mode, setMode] = useState('camera') // 'camera' | 'search'
@@ -134,21 +177,99 @@ export default function GateTablet() {
   const [result, setResult] = useState(null)
   const [overriding, setOverriding] = useState(false)
   const [cameraActive, setCameraActive] = useState(true)
+  const [isOnline, setIsOnline] = useState(navigator.onLine)
+  const [queuedCount, setQueuedCount] = useState(getOfflineQueue().length)
+  const [syncing, setSyncing] = useState(false)
   const inputRef = useRef()
 
+  // Seed member cache on mount
+  useEffect(() => {
+    async function seedCache() {
+      try {
+        const { data } = await api.get('/members?active=true')
+        cacheMembersLocally(data)
+      } catch {}
+    }
+    seedCache()
+  }, [])
+
+  // Online/offline detection
+  useEffect(() => {
+    function handleOnline() {
+      setIsOnline(true)
+      syncQueue()
+    }
+    function handleOffline() { setIsOnline(false) }
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
+
   useEffect(() => { inputRef.current?.focus() }, [status])
+
+  // Sync queued offline check-ins when back online
+  const syncQueue = useCallback(async () => {
+    const q = getOfflineQueue()
+    if (!q.length) return
+    setSyncing(true)
+    try {
+      for (const entry of q) {
+        try {
+          await api.post('/attendance/checkin', { qrCode: entry.qrCode, note: 'Offline sync' })
+        } catch {}
+      }
+      clearOfflineQueue()
+      setQueuedCount(0)
+    } finally { setSyncing(false) }
+  }, [])
 
   async function checkIn(qrCode, override = false, note = '') {
     setStatus(STATUS.loading)
     setCameraActive(false)
+
+    if (!isOnline) {
+      // Offline path: validate from cache
+      const cached = getOfflineMember(qrCode)
+      if (cached && cached.active && !cached.suspendedAt && cached.registrationStatus === 'approved') {
+        enqueueOfflineCheckin(qrCode)
+        setQueuedCount(getOfflineQueue().length)
+        setResult({ ok: true, offlineAllowed: true, member: cached })
+        setStatus(STATUS.allowed)
+      } else {
+        setResult({ ok: false, message: cached ? 'Member not eligible (offline)' : 'QR not found in offline cache', code: 'OFFLINE_BLOCKED' })
+        setStatus(STATUS.blocked)
+      }
+      return
+    }
+
     try {
       const { data } = await api.post('/attendance/checkin', { qrCode, override, note })
       setResult({ ...data, overrideOk: override })
       setStatus(STATUS.allowed)
     } catch (err) {
-      const d = err.response?.data
-      setResult(d || { ok: false, message: 'Server error' })
-      setStatus(STATUS.blocked)
+      const isNetworkError = !err.response
+      if (isNetworkError) {
+        // Connectivity dropped mid-session — fall back to cache
+        setIsOnline(false)
+        const cached = getOfflineMember(qrCode)
+        if (cached && cached.active && !cached.suspendedAt && cached.registrationStatus === 'approved') {
+          enqueueOfflineCheckin(qrCode)
+          setQueuedCount(getOfflineQueue().length)
+          setResult({ ok: true, offlineAllowed: true, member: cached })
+          setStatus(STATUS.allowed)
+        } else {
+          setResult({ ok: false, message: 'Network lost. QR not in offline cache.', code: 'OFFLINE_BLOCKED' })
+          setStatus(STATUS.blocked)
+        }
+      } else {
+        const d = err.response?.data
+        setResult(d || { ok: false, message: 'Server error' })
+        setStatus(STATUS.blocked)
+      }
     }
   }
 
@@ -186,10 +307,28 @@ export default function GateTablet() {
           <span className="font-bold text-lg">Gate Check-In</span>
         </div>
         <div className="flex items-center gap-4">
+          {/* Connectivity badge */}
+          {isOnline ? (
+            <span className="flex items-center gap-1 text-green-400 text-xs font-medium">
+              <Wifi size={14} /> Online
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-yellow-400 text-xs font-medium animate-pulse">
+              <WifiOff size={14} /> Offline{queuedCount > 0 ? ` · ${queuedCount} queued` : ''}
+            </span>
+          )}
+          {syncing && <span className="text-blue-400 text-xs animate-pulse">Syncing…</span>}
           <span className="text-gray-400 text-sm">{user?.name}</span>
           <button onClick={logout} className="text-gray-400 hover:text-white"><LogOut size={18} /></button>
         </div>
       </header>
+
+      {/* Offline banner */}
+      {!isOnline && (
+        <div className="bg-yellow-500/20 border-b border-yellow-500/30 px-6 py-2 text-yellow-300 text-sm text-center">
+          Working offline — using cached member list. Check-ins will sync when connection is restored.
+        </div>
+      )}
 
       {/* Mode toggle */}
       <div className="flex mx-6 mt-5 bg-gray-800 rounded-xl p-1">
@@ -213,6 +352,7 @@ export default function GateTablet() {
           <ResultDisplay
             result={result}
             overriding={overriding}
+            offline={!isOnline}
             onReset={reset}
             onOverride={async (note) => {
               setOverriding(true)
@@ -257,26 +397,27 @@ export default function GateTablet() {
         )}
       </div>
 
-      <TodayCount />
+      <TodayCount offline={!isOnline} />
     </div>
   )
 }
 
-function TodayCount() {
+function TodayCount({ offline }) {
   const [count, setCount] = useState(null)
   useEffect(() => {
+    if (offline) return
     api.get('/attendance').then((r) => setCount(r.data.length)).catch(() => {})
     const t = setInterval(() => {
       api.get('/attendance').then((r) => setCount(r.data.length)).catch(() => {})
     }, 30000)
     return () => clearInterval(t)
-  }, [])
+  }, [offline])
 
   return (
     <div className="px-6 pb-6">
       <div className="bg-gray-800 rounded-xl px-5 py-3 flex items-center justify-between">
         <span className="text-gray-400 text-sm">Today's check-ins</span>
-        <span className="text-white font-bold text-lg">{count ?? '…'}</span>
+        <span className="text-white font-bold text-lg">{offline ? '—' : (count ?? '…')}</span>
       </div>
     </div>
   )
